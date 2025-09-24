@@ -1,0 +1,425 @@
+/**
+ * EventChain Database Schema
+ * 
+ * This Prisma schema defines our data models for the Web3 ticketing platform.
+ * It includes user management, event organization, NFT tickets, loyalty tokens,
+ * and SMS affiliate tracking.
+ * 
+ * Key Design Principles:
+ * - Normalized relations to prevent data duplication
+ * - Indexes on frequently queried fields for performance
+ * - UUID primary keys for security and distributed systems
+ * - Soft deletes where appropriate for data retention
+ * - Audit trails with created/updated timestamps
+ */
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/**
+ * User Model
+ * 
+ * Represents all users in our system: event organizers, ticket buyers, affiliates, and staff.
+ * Uses role-based access control (RBAC) for permissions.
+ */
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  phone     String?  @unique
+  firstName String
+  lastName  String
+  password  String   // Hashed using bcrypt
+  
+  // User role determines what they can access
+  role      UserRole @default(USER)
+  
+  // Account status management
+  isActive     Boolean @default(true)
+  isVerified   Boolean @default(false)
+  lastLoginAt  DateTime?
+  
+  // Audit fields
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations - what this user owns/participates in
+  eventsOrganized     Event[]           @relation("EventOrganizer")
+  ticketsPurchased    Ticket[]          @relation("TicketOwner")
+  loyaltyTransactions LoyaltyTransaction[]
+  affiliateStats      AffiliateStats[]
+  ticketValidations   TicketValidation[]
+  
+  @@map("users")
+}
+
+/**
+ * User roles defining access permissions
+ */
+enum UserRole {
+  USER        // Regular ticket buyers
+  ORGANIZER   // Event creators
+  AFFILIATE   // SMS marketing partners
+  STAFF       // Event gate staff
+  ADMIN       // Platform administrators
+}
+
+/**
+ * Event Model
+ * 
+ * Represents events that users can create and sell tickets for.
+ * Each event can have multiple ticket types with different pricing.
+ */
+model Event {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  location    String
+  
+  // Event timing
+  startDate   DateTime
+  endDate     DateTime
+  timezone    String   @default("UTC")
+  
+  // Event imagery and branding
+  imageUrl    String?
+  bannerUrl   String?
+  
+  // Event settings
+  maxCapacity    Int?
+  isPublic       Boolean @default(true)
+  requiresApproval Boolean @default(false)
+  
+  // Event status
+  status      EventStatus @default(DRAFT)
+  
+  // Relations
+  organizerId String
+  organizer   User     @relation("EventOrganizer", fields: [organizerId], references: [id])
+  
+  tickets     Ticket[]
+  ticketTypes TicketType[]
+  
+  // Audit fields
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  
+  @@map("events")
+  @@index([organizerId])
+  @@index([startDate])
+  @@index([status])
+}
+
+/**
+ * Event status lifecycle
+ */
+enum EventStatus {
+  DRAFT       // Being created by organizer
+  PUBLISHED   // Open for ticket sales
+  ONGOING     // Event is currently happening
+  COMPLETED   // Event has ended
+  CANCELLED   // Event was cancelled
+}
+
+/**
+ * Ticket Type Model
+ * 
+ * Different ticket categories for an event (General, VIP, Early Bird, etc.)
+ * Each type has its own pricing and availability.
+ */
+model TicketType {
+  id          String @id @default(cuid())
+  name        String
+  description String?
+  
+  // Pricing
+  price       Decimal @db.Decimal(10, 2)
+  currency    String  @default("USD")
+  
+  // Availability
+  maxQuantity    Int?
+  soldQuantity   Int  @default(0)
+  
+  // Sale period
+  saleStartDate  DateTime?
+  saleEndDate    DateTime?
+  
+  // Features
+  isTransferable Boolean @default(true)
+  maxPerUser     Int?    @default(10)
+  
+  // Relations
+  eventId String
+  event   Event    @relation(fields: [eventId], references: [id])
+  tickets Ticket[]
+  
+  // Audit fields
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@map("ticket_types")
+  @@index([eventId])
+}
+
+/**
+ * Ticket Model - The NFT Tickets
+ * 
+ * Each ticket is an NFT on Hedera Hashgraph.
+ * Contains both Web2 database record and Web3 blockchain reference.
+ */
+model Ticket {
+  id              String @id @default(cuid())
+  
+  // NFT identification on Hedera
+  hederaTokenId   String  @unique  // Hedera Token ID
+  hederaNftId     String  @unique  // NFT serial number within the token
+  
+  // Ticket details
+  seatNumber      String?
+  qrCode          String  @unique  // QR code for gate scanning
+  
+  // Purchase information
+  purchasePrice   Decimal @db.Decimal(10, 2)
+  purchaseCurrency String @default("USD")
+  
+  // Ticket status
+  status          TicketStatus @default(ACTIVE)
+  
+  // Validation tracking
+  isUsed          Boolean @default(false)
+  usedAt          DateTime?
+  
+  // Relations
+  eventId         String
+  event           Event      @relation(fields: [eventId], references: [id])
+  
+  ticketTypeId    String
+  ticketType      TicketType @relation(fields: [ticketTypeId], references: [id])
+  
+  ownerId         String
+  owner           User       @relation("TicketOwner", fields: [ownerId], references: [id])
+  
+  validations     TicketValidation[]
+  
+  // Audit fields
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@map("tickets")
+  @@index([hederaTokenId])
+  @@index([ownerId])
+  @@index([eventId])
+  @@index([qrCode])
+}
+
+/**
+ * Ticket status lifecycle
+ */
+enum TicketStatus {
+  ACTIVE      // Valid and unused
+  USED        // Has been scanned at event
+  TRANSFERRED // Ownership changed
+  REFUNDED    // Money returned, ticket invalid
+  CANCELLED   // Event cancelled
+}
+
+/**
+ * Ticket Validation Model
+ * 
+ * Records when tickets are scanned at event gates.
+ * Supports offline validation by storing validation attempts.
+ */
+model TicketValidation {
+  id          String @id @default(cuid())
+  
+  // Validation details
+  isValid     Boolean
+  reason      String?  // Why validation failed
+  
+  // Location and timing
+  scannedAt   DateTime @default(now())
+  location    String?  // Gate/entrance name
+  deviceId    String?  // Scanner device identifier
+  
+  // Relations
+  ticketId    String
+  ticket      Ticket @relation(fields: [ticketId], references: [id])
+  
+  validatedBy String
+  validator   User   @relation(fields: [validatedBy], references: [id])
+  
+  @@map("ticket_validations")
+  @@index([ticketId])
+  @@index([scannedAt])
+}
+
+/**
+ * Loyalty Transaction Model
+ * 
+ * Tracks earning and spending of loyalty points (fungible tokens on Hedera).
+ * Points are awarded for purchases and can be redeemed for discounts.
+ */
+model LoyaltyTransaction {
+  id              String @id @default(cuid())
+  
+  // Transaction details
+  type            LoyaltyTransactionType
+  amount          Int                    // Points amount (can be negative for redemption)
+  description     String
+  
+  // Hedera blockchain reference
+  hederaTxId      String? @unique        // Hedera transaction ID
+  
+  // Relations
+  userId          String
+  user            User   @relation(fields: [userId], references: [id])
+  
+  // Optional event relation (if points earned from ticket purchase)
+  eventId         String?
+  
+  // Audit fields
+  createdAt       DateTime @default(now())
+  
+  @@map("loyalty_transactions")
+  @@index([userId])
+  @@index([type])
+}
+
+/**
+ * Types of loyalty point transactions
+ */
+enum LoyaltyTransactionType {
+  EARNED_PURCHASE    // Points earned from ticket purchase
+  EARNED_REFERRAL    // Points earned from successful referral
+  EARNED_BONUS       // Bonus points from promotions
+  REDEEMED_DISCOUNT  // Points used for discount
+  REDEEMED_REWARD    // Points used for rewards
+  EXPIRED            // Points that expired
+}
+
+/**
+ * Affiliate Stats Model
+ * 
+ * Tracks performance of SMS affiliate marketers.
+ * Used for calculating commissions and bonuses.
+ */
+model AffiliateStats {
+  id                String @id @default(cuid())
+  
+  // Performance metrics
+  totalReferrals    Int    @default(0)
+  successfulSales   Int    @default(0)
+  totalCommission   Decimal @db.Decimal(10, 2) @default(0)
+  
+  // Time period tracking
+  periodStart       DateTime
+  periodEnd         DateTime
+  
+  // Relations
+  affiliateId       String
+  affiliate         User   @relation(fields: [affiliateId], references: [id])
+  
+  // Audit fields
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  @@map("affiliate_stats")
+  @@index([affiliateId])
+  @@index([periodStart])
+}
+
+/**
+ * SMS Campaign Model
+ * 
+ * Tracks SMS marketing campaigns sent by affiliates.
+ * Monitors delivery, clicks, and conversions.
+ */
+model SmsCampaign {
+  id              String @id @default(cuid())
+  
+  // Campaign details
+  name            String
+  message         String
+  targetAudience  String
+  
+  // Campaign metrics
+  totalSent       Int     @default(0)
+  delivered       Int     @default(0)
+  clicked         Int     @default(0)
+  converted       Int     @default(0)
+  
+  // Campaign status
+  status          CampaignStatus @default(DRAFT)
+  
+  // Timing
+  scheduledAt     DateTime?
+  sentAt          DateTime?
+  
+  // Relations to events being promoted
+  promotedEvents  String[]  // Array of event IDs
+  
+  // Relations
+  createdBy       String
+  affiliate       User   @relation(fields: [createdBy], references: [id])
+  
+  // Audit fields
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@map("sms_campaigns")
+  @@index([createdBy])
+  @@index([status])
+}
+
+/**
+ * SMS Campaign status
+ */
+enum CampaignStatus {
+  DRAFT       // Being prepared
+  SCHEDULED   // Scheduled for future send
+  SENDING     // Currently being sent
+  SENT        // Completed sending
+  PAUSED      // Temporarily stopped
+  CANCELLED   // Cancelled before completion
+}
+
+/**
+ * Session Model
+ * 
+ * For JWT token management and user session tracking.
+ * Allows for token revocation and session management.
+ */
+model Session {
+  id          String   @id @default(cuid())
+  
+  // Session identification
+  token       String   @unique
+  refreshToken String?  @unique
+  
+  // Session metadata
+  userAgent   String?
+  ipAddress   String?
+  deviceType  String?
+  
+  // Session lifecycle
+  expiresAt   DateTime
+  lastUsedAt  DateTime @default(now())
+  isRevoked   Boolean  @default(false)
+  
+  // Relations
+  userId      String
+  
+  // Audit fields
+  createdAt   DateTime @default(now())
+  
+  @@map("sessions")
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+}
