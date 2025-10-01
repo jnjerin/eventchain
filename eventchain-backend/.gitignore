@@ -1,0 +1,101 @@
+# EventChain Backend - Specific .gitignore
+
+# ==============================================================================
+# ENVIRONMENT FILES
+# ==============================================================================
+
+# Actual environment file with secrets (NEVER commit)
+.env*
+.env.local
+.env.development.local
+.env.production.local
+
+# Keep .env.example committed (it's a template for other developers)
+
+# ==============================================================================
+# NODE.JS
+# ==============================================================================
+
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json  # Uncomment if using yarn instead
+
+# ==============================================================================
+# BUILD & RUNTIME
+# ==============================================================================
+
+# TypeScript build output
+dist/
+build/
+
+# TypeScript incremental compilation
+*.tsbuildinfo
+
+# ==============================================================================
+# LOGS & TEMP FILES
+# ==============================================================================
+
+# Application logs
+logs/
+*.log
+
+# Temporary files
+tmp/
+temp/
+
+# ==============================================================================
+# DATABASE
+# ==============================================================================
+
+# SQLite files (if using for local development)
+*.db
+*.sqlite
+*.sqlite3
+
+# Database backup files
+*.backup
+*.bak
+
+# Prisma migrations (keep migrations, but ignore specific generated files)
+# prisma/migrations/  # Uncomment only if you want to ignore migrations
+
+# ==============================================================================
+# DEVELOPMENT TOOLS
+# ==============================================================================
+
+# Jest coverage
+coverage/
+*.lcov
+
+# Editor directories and files
+.vscode/
+!.vscode/settings.json
+.idea/
+
+# ==============================================================================
+# HEDERA DEVELOPMENT
+# ==============================================================================
+
+# Private keys (if stored locally for development)
+*.pem
+*.key
+private-keys/
+
+# Transaction logs
+hedera-logs/
+transaction-receipts/
+
+# ==============================================================================
+# TESTING
+# ==============================================================================
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Test databases
+test.db
+*.test.sqlite
