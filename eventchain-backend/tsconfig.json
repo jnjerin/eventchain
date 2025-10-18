@@ -5,7 +5,7 @@
     "lib": ["ES2022"],
     
     /* Modules */
-    "module": "commonjs",
+    "module": "node16",
     "rootDir": "./src",
     "moduleResolution": "node16",
     "baseUrl": "./src",
@@ -45,7 +45,8 @@
     "noImplicitOverride": true,
     
     /* Completeness */
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "ignoreDeprecations": "6.0"
   },
   "include": [
     "src/**/*"
